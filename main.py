@@ -3,9 +3,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from torchvision import transforms
-from torch.autograd import Variable
 
 import numpy as np
+from torch.autograd import Variable
 
 import argparse
 from models import *
@@ -39,9 +39,18 @@ def main(args, ITE=0):
     classifier = Classifier().to(device)
     discriminator = Discriminator().to(device)
 
+    for params in classifier.parameters():
+        params.requires_grad = True
+
+    for params in discriminator.parameters():
+        params.requires_grad = True
+        
+    for params in feature_extractor.parameters():
+        params.requires_grad = True
+
     ## loss 
-    classifier_criterion = nn.NLLLoss()
-    discriminator_criterion = nn.NLLLoss()
+    classifier_criterion = nn.CrossEntropyLoss().to(device)
+    discriminator_criterion = nn.BCELoss().to(device)
 
     ## learning rate and domain adaptation
     p = 0  # training progress changes linearly from 0 to 1
@@ -52,17 +61,21 @@ def main(args, ITE=0):
 
     ## optimizer
     params = list(feature_extractor.parameters())+list(classifier.parameters())+list(discriminator.parameters())
-    optimizer = torch.optim.Adam(params, lr=lr)
+    optimizer = torch.optim.SGD(params, lr=lr)
 
     # train
     for epoch in range(1, args.epochs+1):
         
         start_steps = (epoch-1)*len(svhn_train_loader)
         total_steps = args.epochs *len(svhn_train_loader)
-        
+
+        feature_extractor.train()
+        classifier.train()
+        discriminator.train()
+
         for batch_idx, (sdata, tdata) in enumerate(zip(svhn_train_loader, mnist_train_loader)):
             # update domain classifier
-            p = (batch_idx+ start_steps) / total_steps
+            p = float(batch_idx+ start_steps) / total_steps
             lr = args.lr / ((1+alpha*p)**bta)
             lmda = 2. / (1. + np.exp(-args.gamma*p)) -1
 
@@ -70,37 +83,34 @@ def main(args, ITE=0):
             svhn_img, svhn_label = sdata
             mnist_img, _ = tdata
 
-            svhn_img = svhn_img.to(device)
-            mnist_img = mnist_img.to(device)
-            svhn_label = svhn_label.to(device)
+            svhn_img = Variable(svhn_img.to(device))
+            mnist_img = Variable(mnist_img.to(device))
+            svhn_label = Variable(svhn_label.to(device))
 
-            optimizer.zero_grad()
+            optimizer.zero_grad()          
 
             # Classifier training 
             svhn_feature = feature_extractor(svhn_img)
             svhn_pred = classifier(svhn_feature)
+
             C_loss = classifier_criterion(svhn_pred, svhn_label)
 
             # Discriminator
             # Domain adaptation regularizer from current domain 
             svhn_feature2 = feature_extractor(svhn_img)
             src_pred = discriminator(svhn_feature2, lmda)
-
-            d_label = Variable(torch.zeros(args.batch_size).long().to(device))
-            
-            src_loss = discriminator_criterion(src_pred, d_label)
-
             # ... from target domain.
             tgt_feature = feature_extractor(mnist_img)
             tgt_pred = discriminator(tgt_feature, lmda) 
 
-            d_label2 = Variable(torch.ones(args.batch_size).long().to(device))
+            d_label = Variable(torch.zeros(svhn_img.shape[0]).to(device))
+            src_loss = discriminator_criterion(src_pred, d_label)
+            d_label2 = Variable(torch.ones(mnist_img.shape[0]).to(device))
             tgt_loss = discriminator_criterion(tgt_pred, d_label2)
 
             D_loss = src_loss + tgt_loss
-            loss = C_loss + D_loss
+            loss = C_loss - D_loss*lmda
             loss.backward()
-
             # update parameter
             optimizer.step()
 
@@ -122,6 +132,7 @@ def main(args, ITE=0):
 def test(feature, model, data_loader, device, name):
     feature.eval()
     model.eval()
+
     n_total = 0 
     n_correct = 0 
     
@@ -138,7 +149,7 @@ def test(feature, model, data_loader, device, name):
         label = label.to(device)
 
         ft = feature(img)
-        pred = model(ft.view(batch_size, -1))
+        pred = model(ft)
         pred = pred.data.max(1, keepdim=True)[1]
         n_correct += pred.eq(label.data.view_as(pred)).cpu().sum()
         n_total += batch_size
