@@ -20,18 +20,21 @@ class FeatureExtractor(nn.Module):
     def __init__(self):
         super(FeatureExtractor, self).__init__()
         self.conv1 = nn.Conv2d(1, 64, 5, padding=3)
+        self.bn1 = nn.BatchNorm2d(64)
         self.pool1 = nn.MaxPool2d(3, 2)
         self.conv2 = nn.Conv2d(64, 64, 5, padding=3)
+        self.bn2 = nn.BatchNorm2d(64)
         self.pool2 = nn.MaxPool2d(3, 2)
         self.conv3 = nn.Conv2d(64, 128, 5, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
         
     def forward(self, x):
         # train on SVHN
         batch_size = x.data.shape[0]
         x = x.expand(batch_size, 1, 28, 28)
-        x = self.pool1(F.relu(self.conv1(x)))
-        x = self.pool2(F.relu(self.conv2(x)))
-        x = F.relu(self.conv3(x))
+        x = self.pool1(F.relu(self.bn1(self.conv1(x))))
+        x = self.pool2(F.relu(self.bn2(self.conv2(x))))
+        x = F.relu(self.bn3(self.conv3(x)))
         return x.view(batch_size, -1)
 
 # Classifier
@@ -58,8 +61,9 @@ class Discriminator(nn.Module):
         self.fc3 = nn.Linear(1024, 1)
         
     def forward(self, x, lmda):
-        # x = GRL.apply(x, lmda)
+        x = GRL.apply(x, lmda)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = F.sigmoid(self.fc3(x))
+        x = x.squeeze()
         return x

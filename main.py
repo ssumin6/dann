@@ -83,11 +83,11 @@ def main(args, ITE=0):
             svhn_img, svhn_label = sdata
             mnist_img, _ = tdata
 
+            optimizer.zero_grad()
+
             svhn_img = Variable(svhn_img.to(device))
             mnist_img = Variable(mnist_img.to(device))
-            svhn_label = Variable(svhn_label.to(device))
-
-            optimizer.zero_grad()          
+            svhn_label = Variable(svhn_label.to(device))       
 
             # Classifier training 
             svhn_feature = feature_extractor(svhn_img)
@@ -109,7 +109,7 @@ def main(args, ITE=0):
             tgt_loss = discriminator_criterion(tgt_pred, d_label2)
 
             D_loss = src_loss + tgt_loss
-            loss = C_loss - D_loss*lmda
+            loss = C_loss + D_loss
             loss.backward()
             # update parameter
             optimizer.step()
@@ -120,7 +120,7 @@ def main(args, ITE=0):
         test(feature_extractor, classifier, svhn_test_loader, device, "svhn")
         test(feature_extractor, classifier, mnist_test_loader, device, "mnist")
 
-        if (epoch % 25 == 0):
+        if (epoch % 50 == 0):
             torch.save({
             'feature' : feature_extractor.state_dict(),
             'discriminator' : discriminator.state_dict(),
